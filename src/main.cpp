@@ -39,18 +39,20 @@ struct Args {
 };
 
 void printUsage(const std::string& prog) {
-    std::cout << "\nMedical Image Processor v1.0\n"
+    std::cout << "\nMedical Image Processor v2.0\n"
               << "============================\n\n"
               << "Usage:\n"
               << "  " << prog << " --input <file.bmp> --output <file.bmp> [options]\n\n"
               << "Options:\n"
               << "  --filter <name>      Apply a filter. Can be repeated.\n"
-              << "                       Values: sobel, gaussian, equalize\n"
+              << "                       Values: sobel, gaussian, equalize, median, unsharp\n"
               << "  --pipeline full      Run: Gaussian → Equalize → Sobel\n"
+              << "  --pipeline denoise   Run: Median → Unsharp Mask (detail enhancement)\n"
               << "  --benchmark          Print per-stage processing time in ms\n"
               << "  --help               Show this message\n\n"
               << "Examples:\n"
               << "  " << prog << " --input chest.bmp --output edges.bmp --filter sobel\n"
+              << "  " << prog << " --input scan.bmp  --output out.bmp   --filter median --filter unsharp\n"
               << "  " << prog << " --input scan.bmp  --output out.bmp   --pipeline full --benchmark\n\n";
 }
 
@@ -83,8 +85,10 @@ std::unique_ptr<Filter> makeFilter(const std::string& name) {
     if (name == "sobel")    return std::make_unique<SobelFilter>();
     if (name == "gaussian") return std::make_unique<GaussianBlur>(3, 1.0f);
     if (name == "equalize") return std::make_unique<HistogramEqualizer>();
+    if (name == "median")   return std::make_unique<MedianFilter>(3);
+    if (name == "unsharp")  return std::make_unique<UnsharpMask>(1.0f, 3, 1.0f);
     throw std::invalid_argument("Unknown filter: '" + name
-        + "'. Valid options: sobel, gaussian, equalize");
+        + "'. Valid options: sobel, gaussian, equalize, median, unsharp");
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -129,15 +133,18 @@ int main(int argc, char* argv[]) {
         pipeline.withBenchmark(args.benchmark);
 
         if (!args.pipeline.empty()) {
-            // Predefined pipeline
             if (args.pipeline == "full") {
                 std::cout << "\nRunning full diagnostic preprocessing pipeline:\n";
                 pipeline.addStage(std::make_unique<GaussianBlur>(3, 1.0f));
                 pipeline.addStage(std::make_unique<HistogramEqualizer>());
                 pipeline.addStage(std::make_unique<SobelFilter>());
+            } else if (args.pipeline == "denoise") {
+                std::cout << "\nRunning denoise + detail enhancement pipeline:\n";
+                pipeline.addStage(std::make_unique<MedianFilter>(3));
+                pipeline.addStage(std::make_unique<UnsharpMask>(1.0f, 3, 1.0f));
             } else {
                 throw std::invalid_argument("Unknown pipeline: '" + args.pipeline
-                    + "'. Valid: full");
+                    + "'. Valid: full, denoise");
             }
         } else {
             // User-specified filter sequence
