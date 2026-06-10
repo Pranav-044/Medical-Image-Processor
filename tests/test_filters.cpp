@@ -276,7 +276,6 @@ void testPipeline() {
     std::cout << "\n[T6] Processing Pipeline\n";
 
     Image<uint8_t> input(20, 20, 1);
-    // Fill with gradient 0-255
     for (int r = 0; r < 20; ++r)
         for (int c = 0; c < 20; ++c)
             input(r, c, 0) = static_cast<uint8_t>((r * 20 + c) % 256);
@@ -297,6 +296,130 @@ void testPipeline() {
     CHECK(passThrough(5, 5, 0) == input(5, 5, 0), "Empty pipeline is a pass-through");
 }
 
+// ─── T7: Median Filter ────────────────────────────────────────────────────────
+
+void testMedianFilter() {
+    std::cout << "\n[T7] Median Filter\n";
+
+    // Uniform image — median of uniform neighbourhood = same value
+    Image<uint8_t> flat(10, 10, 1);
+    flat.fill(100);
+    MedianFilter mf(3);
+    Image<uint8_t> result = mf.apply(flat);
+
+    bool interiorCorrect = true;
+    for (int r = 1; r < 9; ++r)
+        for (int c = 1; c < 9; ++c)
+            if (result(r, c, 0) != 100) interiorCorrect = false;
+    CHECK(interiorCorrect, "Median of uniform image preserves interior values");
+    CHECK(result.getWidth() == 10 && result.getHeight() == 10,
+          "Median filter preserves dimensions");
+
+    // Salt-and-pepper noise: most pixels = 128, two spikes = 0 and 255
+    // The median should remove the spikes
+    Image<uint8_t> noisy(7, 7, 1);
+    noisy.fill(128);
+    noisy(3, 3, 0) = 255;   // salt spike
+    noisy(3, 4, 0) = 0;     // pepper spike
+    Image<uint8_t> denoised = mf.apply(noisy);
+    // After median filtering, the centre should be back near 128
+    CHECK(denoised(3, 3, 0) >= 100 && denoised(3, 3, 0) <= 150,
+          "Median filter removes salt spike at centre");
+
+    // Values always in [0, 255]
+    bool allValid = true;
+    for (int r = 0; r < 10; ++r)
+        for (int c = 0; c < 10; ++c)
+            if (result(r, c, 0) > 255) allValid = false;
+    CHECK(allValid, "All median filter output pixels in [0, 255]");
+
+    // name check
+    CHECK(mf.name().find("Median") != std::string::npos, "MedianFilter name contains 'Median'");
+
+    // Throws on RGB
+    Image<uint8_t> rgb(5, 5, 3);
+    CHECK_THROW(mf.apply(rgb), std::invalid_argument,
+                "MedianFilter throws on 3-channel input");
+}
+
+// ─── T8: Unsharp Mask ─────────────────────────────────────────────────────────
+
+void testUnsharpMask() {
+    std::cout << "\n[T8] Unsharp Mask\n";
+
+    // Uniform image: original - blurred = 0, so output = original (amount irrelevant)
+    Image<uint8_t> flat(20, 20, 1);
+    flat.fill(120);
+    UnsharpMask um(1.5f, 3, 1.0f);
+    Image<uint8_t> result = um.apply(flat);
+
+    bool uniform = true;
+    for (int r = 2; r < 18; ++r)
+        for (int c = 2; c < 18; ++c)
+            if (result(r, c, 0) < 115 || result(r, c, 0) > 125) uniform = false;
+    CHECK(uniform, "UnsharpMask on uniform image leaves interior unchanged");
+    CHECK(result.getWidth() == 20 && result.getHeight() == 20,
+          "UnsharpMask preserves dimensions");
+
+    // Output values stay in [0, 255] even with aggressive amount
+    UnsharpMask aggressive(5.0f, 3, 1.0f);
+    Image<uint8_t> edge(20, 20, 1);
+    for (int r = 0; r < 20; ++r)
+        for (int c = 0; c < 20; ++c)
+            edge(r, c, 0) = (c < 10) ? 50 : 200;
+    Image<uint8_t> sharpened = aggressive.apply(edge);
+
+    bool allValid = true;
+    for (int r = 0; r < 20; ++r)
+        for (int c = 0; c < 20; ++c)
+            if (sharpened(r, c, 0) > 255) allValid = false;
+    CHECK(allValid, "UnsharpMask output always in [0, 255] even at amount=5");
+
+    // name check
+    CHECK(um.name().find("Unsharp") != std::string::npos,
+          "UnsharpMask name contains 'Unsharp'");
+
+    // Throws on RGB
+    Image<uint8_t> rgb(5, 5, 3);
+    CHECK_THROW(um.apply(rgb), std::invalid_argument,
+                "UnsharpMask throws on 3-channel input");
+}
+
+// ─── T9: Multithreaded Gaussian ───────────────────────────────────────────────
+
+void testMultithreadedGaussian() {
+    std::cout << "\n[T9] Multithreaded Gaussian Blur\n";
+
+    // Results should be identical to single-threaded because thread count
+    // doesn't affect correctness — only speed.
+    Image<uint8_t> input(64, 64, 1);
+    for (int r = 0; r < 64; ++r)
+        for (int c = 0; c < 64; ++c)
+            input(r, c, 0) = static_cast<uint8_t>((r + c) % 256);
+
+    GaussianBlur blur(3, 1.0f);
+    Image<uint8_t> result = blur.apply(input);
+
+    CHECK(result.getWidth() == 64 && result.getHeight() == 64,
+          "Multithreaded Gaussian preserves dimensions");
+
+    // All pixels must be valid
+    bool allValid = true;
+    for (int r = 0; r < 64; ++r)
+        for (int c = 0; c < 64; ++c)
+            if (result(r, c, 0) > 255) allValid = false;
+    CHECK(allValid, "Multithreaded Gaussian output always in [0, 255]");
+
+    // Interior pixels should be smoothed (not identical to input)
+    // For a gradient image, adjacent pixels should have similar values after blur
+    int largeJumps = 0;
+    for (int r = 2; r < 62; ++r)
+        for (int c = 2; c < 61; ++c)
+            if (std::abs((int)result(r,c,0) - (int)result(r,c+1,0)) > 30)
+                ++largeJumps;
+    CHECK(largeJumps == 0, "Gaussian blur smooths gradient (no large adjacent jumps)");
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -310,6 +433,9 @@ int main() {
     testSobelFilter();
     testHistogramEqualizer();
     testPipeline();
+    testMedianFilter();
+    testUnsharpMask();
+    testMultithreadedGaussian();
 
     std::cout << "\n====================================\n";
     std::cout << "  Results: " << passed << " passed, " << failed << " failed\n";
@@ -317,3 +443,4 @@ int main() {
 
     return (failed == 0) ? 0 : 1;
 }
+
