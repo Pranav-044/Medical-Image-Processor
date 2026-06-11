@@ -16,12 +16,16 @@ add_executable(medimg
 
 target_include_directories(medimg PRIVATE include)
 
-target_compile_options(medimg PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -O2
-)
+if (MSVC)
+    target_compile_options(medimg PRIVATE /W4 /O2)
+else()
+    target_compile_options(medimg PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -O2
+    )
+endif()
 
 # Link filesystem library (required on older GCC/Clang builds)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
@@ -39,9 +43,11 @@ add_executable(medimg_tests
 
 target_include_directories(medimg_tests PRIVATE include)
 
-target_compile_options(medimg_tests PRIVATE
-    -Wall -Wextra -O2 -DMEDIMG_DEBUG
-)
+if (MSVC)
+    target_compile_options(medimg_tests PRIVATE /W4 /O2 -DMEDIMG_DEBUG)
+else()
+    target_compile_options(medimg_tests PRIVATE -Wall -Wextra -O2 -DMEDIMG_DEBUG)
+endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
     target_link_libraries(medimg_tests PRIVATE stdc++fs)
