@@ -1,15 +1,9 @@
 /**
- * main.cpp — Medical Image Processor CLI
+ * main.cpp — Medical Image Processor CLI v2.1
  *
- * Usage:
- *   ./medimg --input scan.bmp --output result.bmp --filter sobel
- *   ./medimg --input scan.bmp --output result.bmp --filter gaussian
- *   ./medimg --input scan.bmp --output result.bmp --filter equalize
- *   ./medimg --input scan.bmp --output result.bmp --pipeline full
- *   ./medimg --input scan.bmp --output result.bmp --filter sobel --benchmark
- *
- * --pipeline full runs: Gaussian Blur → Histogram Equalization → Sobel
- * This is a realistic preprocessing sequence for CT/MRI edge-enhanced imaging.
+ * Available filters: sobel, gaussian, equalize, median, unsharp, laplacian, windowlevel
+ * Available pipelines: full, denoise, log (Laplacian of Gaussian)
+ * Extra flags: --stats (print image statistics), --benchmark
  */
 
 #include "../include/Image.h"
@@ -19,9 +13,12 @@
 #include "../include/Utils.h"
 
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <numeric>
 #include <filesystem>
 #include <stdexcept>
 
@@ -32,28 +29,32 @@ namespace fs = std::filesystem;
 struct Args {
     std::string inputPath;
     std::string outputPath;
-    std::vector<std::string> filters;  // may be multiple (applied in order)
-    std::string pipeline;              // "full" or empty
+    std::vector<std::string> filters;
+    std::string pipeline;
     bool benchmark = false;
-    bool help = false;
+    bool stats     = false;
+    bool help      = false;
 };
 
 void printUsage(const std::string& prog) {
-    std::cout << "\nMedical Image Processor v2.0\n"
+    std::cout << "\nMedical Image Processor v2.1\n"
               << "============================\n\n"
               << "Usage:\n"
               << "  " << prog << " --input <file.bmp> --output <file.bmp> [options]\n\n"
               << "Options:\n"
-              << "  --filter <name>      Apply a filter. Can be repeated.\n"
-              << "                       Values: sobel, gaussian, equalize, median, unsharp\n"
-              << "  --pipeline full      Run: Gaussian → Equalize → Sobel\n"
-              << "  --pipeline denoise   Run: Median → Unsharp Mask (detail enhancement)\n"
-              << "  --benchmark          Print per-stage processing time in ms\n"
-              << "  --help               Show this message\n\n"
+              << "  --filter <name>       Apply a filter. Can be repeated.\n"
+              << "                        sobel, gaussian, equalize, median,\n"
+              << "                        unsharp, laplacian, windowlevel\n"
+              << "  --pipeline full       Gaussian → Equalize → Sobel\n"
+              << "  --pipeline denoise    Median → Unsharp Mask\n"
+              << "  --pipeline log        Gaussian → Laplacian (Laplacian of Gaussian)\n"
+              << "  --stats               Print pixel statistics (min/max/mean/stddev)\n"
+              << "  --benchmark           Print per-stage processing time in ms\n"
+              << "  --help                Show this message\n\n"
               << "Examples:\n"
-              << "  " << prog << " --input chest.bmp --output edges.bmp --filter sobel\n"
-              << "  " << prog << " --input scan.bmp  --output out.bmp   --filter median --filter unsharp\n"
-              << "  " << prog << " --input scan.bmp  --output out.bmp   --pipeline full --benchmark\n\n";
+              << "  " << prog << " --input scan.bmp --output edges.bmp --filter laplacian --stats\n"
+              << "  " << prog << " --input scan.bmp --output out.bmp   --filter windowlevel --filter sobel\n"
+              << "  " << prog << " --input scan.bmp --output out.bmp   --pipeline log --benchmark\n\n";
 }
 
 Args parseArgs(int argc, char* argv[]) {
@@ -72,6 +73,8 @@ Args parseArgs(int argc, char* argv[]) {
             args.pipeline = argv[++i];
         } else if (arg == "--benchmark") {
             args.benchmark = true;
+        } else if (arg == "--stats") {
+            args.stats = true;
         } else {
             std::cerr << "Warning: unknown argument '" << arg << "'\n";
         }
@@ -79,16 +82,58 @@ Args parseArgs(int argc, char* argv[]) {
     return args;
 }
 
+// ─── Image Statistics ─────────────────────────────────────────────────────────
+
+/**
+ * Compute and print pixel statistics for a grayscale image.
+ * Outputs: min, max, mean, standard deviation — the same metrics shown
+ * in DICOM viewer histogram panels.
+ */
+void printStats(const Image<uint8_t>& img, const std::string& label) {
+    int total = img.totalPixels();
+    if (total == 0) return;
+
+    long long sum = 0;
+    uint8_t minVal = 255, maxVal = 0;
+
+    for (int r = 0; r < img.getHeight(); ++r) {
+        for (int c = 0; c < img.getWidth(); ++c) {
+            uint8_t v = img(r, c, 0);
+            sum += v;
+            if (v < minVal) minVal = v;
+            if (v > maxVal) maxVal = v;
+        }
+    }
+
+    double mean = static_cast<double>(sum) / total;
+
+    double variance = 0.0;
+    for (int r = 0; r < img.getHeight(); ++r)
+        for (int c = 0; c < img.getWidth(); ++c) {
+            double diff = static_cast<double>(img(r, c, 0)) - mean;
+            variance += diff * diff;
+        }
+    double stddev = std::sqrt(variance / total);
+
+    std::cout << "\n  [stats: " << label << "]\n"
+              << "    Min:    " << static_cast<int>(minVal) << "\n"
+              << "    Max:    " << static_cast<int>(maxVal) << "\n"
+              << "    Mean:   " << std::fixed << std::setprecision(2) << mean << "\n"
+              << "    StdDev: " << std::fixed << std::setprecision(2) << stddev << "\n";
+}
+
 // ─── Filter Factory ───────────────────────────────────────────────────────────
 
 std::unique_ptr<Filter> makeFilter(const std::string& name) {
-    if (name == "sobel")    return std::make_unique<SobelFilter>();
-    if (name == "gaussian") return std::make_unique<GaussianBlur>(3, 1.0f);
-    if (name == "equalize") return std::make_unique<HistogramEqualizer>();
-    if (name == "median")   return std::make_unique<MedianFilter>(3);
-    if (name == "unsharp")  return std::make_unique<UnsharpMask>(1.0f, 3, 1.0f);
+    if (name == "sobel")       return std::make_unique<SobelFilter>();
+    if (name == "gaussian")    return std::make_unique<GaussianBlur>(3, 1.0f);
+    if (name == "equalize")    return std::make_unique<HistogramEqualizer>();
+    if (name == "median")      return std::make_unique<MedianFilter>(3);
+    if (name == "unsharp")     return std::make_unique<UnsharpMask>(1.0f, 3, 1.0f);
+    if (name == "laplacian")   return std::make_unique<LaplacianFilter>();
+    if (name == "windowlevel") return std::make_unique<WindowLevel>(200.0f, 128.0f);
     throw std::invalid_argument("Unknown filter: '" + name
-        + "'. Valid options: sobel, gaussian, equalize, median, unsharp");
+        + "'. Valid: sobel, gaussian, equalize, median, unsharp, laplacian, windowlevel");
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -122,11 +167,13 @@ int main(int argc, char* argv[]) {
         Image<uint8_t> rgb = ImageIO::loadBMP(args.inputPath);
         std::cout << "  " << rgb.info() << "\n";
 
-        // Convert to grayscale (all filters operate on single-channel images)
         Image<uint8_t> gray = (rgb.getChannels() == 3)
             ? ImageIO::toGrayscale(rgb)
             : rgb;
         std::cout << "  Converted to grayscale: " << gray.info() << "\n";
+
+        // Print input statistics if requested
+        if (args.stats) printStats(gray, "input");
 
         // ── Build Pipeline ────────────────────────────────────────────────────
         ProcessingPipeline pipeline;
@@ -142,12 +189,15 @@ int main(int argc, char* argv[]) {
                 std::cout << "\nRunning denoise + detail enhancement pipeline:\n";
                 pipeline.addStage(std::make_unique<MedianFilter>(3));
                 pipeline.addStage(std::make_unique<UnsharpMask>(1.0f, 3, 1.0f));
+            } else if (args.pipeline == "log") {
+                std::cout << "\nRunning Laplacian of Gaussian (LoG) pipeline:\n";
+                pipeline.addStage(std::make_unique<GaussianBlur>(3, 1.0f));
+                pipeline.addStage(std::make_unique<LaplacianFilter>());
             } else {
                 throw std::invalid_argument("Unknown pipeline: '" + args.pipeline
-                    + "'. Valid: full, denoise");
+                    + "'. Valid: full, denoise, log");
             }
         } else {
-            // User-specified filter sequence
             for (const auto& f : args.filters)
                 pipeline.addStage(makeFilter(f));
         }
@@ -157,6 +207,9 @@ int main(int argc, char* argv[]) {
 
         // ── Execute ───────────────────────────────────────────────────────────
         Image<uint8_t> result = pipeline.run(gray);
+
+        // Print output statistics if requested
+        if (args.stats) printStats(result, "output");
 
         // ── Save Output ───────────────────────────────────────────────────────
         std::cout << "Saving: " << args.outputPath << "\n";
