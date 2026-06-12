@@ -301,3 +301,61 @@ std::string UnsharpMask::name() const {
     return "Unsharp Mask (amount=" + std::to_string(amount_) + ", sigma="
          + std::to_string(sigma_) + ")";
 }
+
+// ─── LaplacianFilter ──────────────────────────────────────────────────────────
+
+// 8-connectivity Laplacian kernel — responds equally to edges in all directions.
+// Sum of all weights = 0 (pure high-pass: DC component is eliminated).
+LaplacianFilter::LaplacianFilter()
+    : ConvolutionFilter({{
+        {-1.0f, -1.0f, -1.0f},
+        {-1.0f,  8.0f, -1.0f},
+        {-1.0f, -1.0f, -1.0f}
+    }})
+{}
+
+Image<uint8_t> LaplacianFilter::apply(const Image<uint8_t>& input) const {
+    if (input.getChannels() != 1)
+        throw std::invalid_argument("LaplacianFilter requires a grayscale (1-channel) image.");
+
+    Image<uint8_t> output(input.getWidth(), input.getHeight(), 1);
+
+    for (int r = 0; r < input.getHeight(); ++r) {
+        for (int c = 0; c < input.getWidth(); ++c) {
+            float val = applyKernelAt(input, r, c, 0);
+            // Take absolute value — edges produce both positive and negative responses
+            output(r, c, 0) = medimg::saturate_cast(std::abs(val));
+        }
+    }
+    return output;
+}
+
+// ─── WindowLevel ──────────────────────────────────────────────────────────────
+
+WindowLevel::WindowLevel(float window, float level)
+    : window_(window), level_(level)
+{
+    if (window_ <= 0.0f)
+        throw std::invalid_argument("WindowLevel: window must be positive.");
+}
+
+Image<uint8_t> WindowLevel::apply(const Image<uint8_t>& input) const {
+    float lower = level_ - window_ / 2.0f;
+    Image<uint8_t> output(input.getWidth(), input.getHeight(), input.getChannels());
+
+    for (int ch = 0; ch < input.getChannels(); ++ch) {
+        for (int r = 0; r < input.getHeight(); ++r) {
+            for (int c = 0; c < input.getWidth(); ++c) {
+                float pixel = static_cast<float>(input(r, c, ch));
+                float mapped = (pixel - lower) / window_ * 255.0f;
+                output(r, c, ch) = medimg::saturate_cast(mapped);
+            }
+        }
+    }
+    return output;
+}
+
+std::string WindowLevel::name() const {
+    return "Window/Level (W=" + std::to_string(static_cast<int>(window_))
+         + ", L=" + std::to_string(static_cast<int>(level_)) + ")";
+}
