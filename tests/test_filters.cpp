@@ -5,12 +5,17 @@
  * Run: ./medimg_tests
  *
  * Tests are grouped by component:
- *   T1 — Image<T> core operations
- *   T2 — BMP I/O
- *   T3 — Gaussian Blur
- *   T4 — Sobel Edge Detection
- *   T5 — Histogram Equalization
- *   T6 — Pipeline
+ *   T1  — Image<T> core operations
+ *   T2  — Utils
+ *   T3  — Gaussian Blur
+ *   T4  — Sobel Edge Detection
+ *   T5  — Histogram Equalization
+ *   T6  — Pipeline
+ *   T7  — Median Filter
+ *   T8  — Unsharp Mask
+ *   T9  — Multithreaded Gaussian
+ *   T10 — Laplacian Filter
+ *   T11 — Window/Level
  */
 
 #include "../include/Image.h"
@@ -420,6 +425,97 @@ void testMultithreadedGaussian() {
     CHECK(largeJumps == 0, "Gaussian blur smooths gradient (no large adjacent jumps)");
 }
 
+// ─── T10: Laplacian Filter ────────────────────────────────────────────────────
+
+void testLaplacianFilter() {
+    std::cout << "\n[T10] Laplacian Edge Detection\n";
+
+    // Uniform image has no second derivative — Laplacian should produce zeros
+    Image<uint8_t> flat(10, 10, 1);
+    flat.fill(100);
+    LaplacianFilter lap;
+    Image<uint8_t> result = lap.apply(flat);
+
+    bool allZero = true;
+    for (int r = 1; r < 9; ++r)
+        for (int c = 1; c < 9; ++c)
+            if (result(r, c, 0) != 0) allZero = false;
+    CHECK(allZero, "Laplacian on uniform image produces zeros in interior");
+    CHECK(result.getChannels() == 1, "Laplacian output is 1-channel");
+    CHECK(result.getWidth() == 10 && result.getHeight() == 10,
+          "Laplacian preserves dimensions");
+
+    // On a sharp step edge, Laplacian should produce non-zero response
+    Image<uint8_t> step(10, 10, 1);
+    for (int r = 0; r < 10; ++r)
+        for (int c = 0; c < 10; ++c)
+            step(r, c, 0) = (c < 5) ? 0 : 200;
+    Image<uint8_t> lapEdge = lap.apply(step);
+    bool edgeDetected = false;
+    for (int r = 1; r < 9; ++r)
+        if (lapEdge(r, 4, 0) > 10 || lapEdge(r, 5, 0) > 10)
+            edgeDetected = true;
+    CHECK(edgeDetected, "Laplacian detects step edge");
+
+    // All output must stay in [0, 255]
+    bool allValid = true;
+    for (int r = 0; r < 10; ++r)
+        for (int c = 0; c < 10; ++c)
+            if (result(r, c, 0) > 255) allValid = false;
+    CHECK(allValid, "Laplacian output always in [0, 255]");
+
+    // name check
+    CHECK(lap.name().find("Laplacian") != std::string::npos,
+          "LaplacianFilter name contains 'Laplacian'");
+
+    // Throws on RGB
+    Image<uint8_t> rgb(5, 5, 3);
+    CHECK_THROW(lap.apply(rgb), std::invalid_argument,
+                "LaplacianFilter throws on 3-channel input");
+}
+
+// ─── T11: Window / Level ──────────────────────────────────────────────────────
+
+void testWindowLevel() {
+    std::cout << "\n[T11] Window/Level\n";
+
+    // Full window (255) centred at 128 — should be approximately identity mapping
+    WindowLevel fullWindow(255.0f, 128.0f);
+    Image<uint8_t> ramp(1, 256, 1);
+    for (int r = 0; r < 256; ++r) ramp(r, 0, 0) = static_cast<uint8_t>(r);
+    Image<uint8_t> mapped = fullWindow.apply(ramp);
+    // Middle pixel (128) should map close to 128
+    CHECK(mapped(128, 0, 0) >= 125 && mapped(128, 0, 0) <= 131,
+          "Full window maps midpoint to near 128");
+    // Min/max clamping
+    CHECK(mapped(0, 0, 0) == 0,   "Full window: pixel 0 maps to 0");
+    CHECK(mapped(255, 0, 0) == 255, "Full window: pixel 255 maps to 255");
+
+    // Narrow window (100) centred at 128 — high contrast, clips above/below
+    WindowLevel narrow(100.0f, 128.0f);
+    Image<uint8_t> result = narrow.apply(ramp);
+    // Pixels far outside [78, 178] should be clipped to 0 or 255
+    CHECK(result(0, 0, 0) == 0,   "Narrow window clips low pixels to 0");
+    CHECK(result(255, 0, 0) == 255, "Narrow window clips high pixels to 255");
+    // Midpoint should still map near 128
+    CHECK(result(128, 0, 0) >= 120 && result(128, 0, 0) <= 136,
+          "Narrow window maps midpoint near 128");
+
+    // All output must be in [0, 255]
+    bool allValid = true;
+    for (int r = 0; r < 256; ++r)
+        if (result(r, 0, 0) > 255) allValid = false;
+    CHECK(allValid, "WindowLevel output always in [0, 255]");
+
+    // name check
+    CHECK(narrow.name().find("Window") != std::string::npos,
+          "WindowLevel name contains 'Window'");
+
+    // Invalid window throws
+    CHECK_THROW(WindowLevel(0.0f, 128.0f), std::invalid_argument,
+                "WindowLevel with window=0 throws");
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -436,6 +532,8 @@ int main() {
     testMedianFilter();
     testUnsharpMask();
     testMultithreadedGaussian();
+    testLaplacianFilter();
+    testWindowLevel();
 
     std::cout << "\n====================================\n";
     std::cout << "  Results: " << passed << " passed, " << failed << " failed\n";
@@ -443,4 +541,3 @@ int main() {
 
     return (failed == 0) ? 0 : 1;
 }
-
