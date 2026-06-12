@@ -238,3 +238,56 @@ public:
     Image<uint8_t> apply(const Image<uint8_t>& input) const override;
     std::string name() const override;
 };
+
+// ─── Laplacian Filter ─────────────────────────────────────────────────────────
+
+/**
+ * LaplacianFilter — Second-order derivative edge detector.
+ *
+ * Applies the discrete Laplacian kernel to detect regions of rapid intensity
+ * change. Unlike Sobel (gradient magnitude), the Laplacian responds to
+ * zero-crossings — giving thinner, more precise edge localisation.
+ *
+ * Kernel (8-connectivity):
+ *   [-1, -1, -1]
+ *   [-1,  8, -1]
+ *   [-1, -1, -1]
+ *
+ * Medical relevance:
+ *   - More sensitive than Sobel to fine detail (hairline fractures in CT,
+ *     nerve fibre boundaries in MRI).
+ *   - Isotropic response — not biased toward horizontal/vertical edges.
+ *   - Apply after Gaussian blur to suppress noise (LoG pipeline).
+ *
+ * Complexity: O(W × H) — fixed 3×3 kernel.
+ */
+class LaplacianFilter : public ConvolutionFilter {
+public:
+    LaplacianFilter();
+    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    std::string name() const override { return "Laplacian Edge Detection"; }
+};
+
+// ─── Window / Level ───────────────────────────────────────────────────────────
+
+/**
+ * WindowLevel — Radiologist contrast control (CT/MRI window-level adjustment).
+ *
+ * Maps the sub-range [level - window/2, level + window/2] to the full output
+ * range [0, 255]. The identical operation exposed by Siemens Syngo.via W/L sliders.
+ *
+ * Formula:
+ *   lower  = level - window / 2
+ *   output = clamp((pixel - lower) / window * 255, 0, 255)
+ *
+ * @param window  Intensity range to map to [0,255]. Smaller = higher contrast.
+ * @param level   Centre of the window (default 128 = midpoint of 8-bit range).
+ */
+class WindowLevel : public Filter {
+    float window_;
+    float level_;
+public:
+    explicit WindowLevel(float window = 200.0f, float level = 128.0f);
+    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    std::string name() const override;
+};
