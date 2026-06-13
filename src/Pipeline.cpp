@@ -1,4 +1,5 @@
-#include "../include/Pipeline.h"
+#include "Pipeline.h"
+#include <numeric>
 
 ProcessingPipeline& ProcessingPipeline::addStage(std::unique_ptr<Filter> f) {
     stages_.push_back(std::move(f));
@@ -15,19 +16,31 @@ Image<uint8_t> ProcessingPipeline::run(const Image<uint8_t>& input) const {
         return input;
 
     Image<uint8_t> current = input;
+    long long totalUs = 0;
 
     for (const auto& stage : stages_) {
         if (benchmark_) {
             auto t0 = std::chrono::high_resolution_clock::now();
             current = stage->apply(current);
             auto t1 = std::chrono::high_resolution_clock::now();
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-            std::cout << "[benchmark] " << stage->name()
-                      << " — " << ms << " ms\n";
+            auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+            totalUs += us;
+
+            // Format as ms with 3 decimal places for readability
+            double ms = static_cast<double>(us) / 1000.0;
+            std::cout << "  [bench] " << stage->name()
+                      << " — " << std::fixed << std::setprecision(3) << ms << " ms\n";
         } else {
             current = stage->apply(current);
         }
     }
+
+    if (benchmark_ && stages_.size() > 1) {
+        double totalMs = static_cast<double>(totalUs) / 1000.0;
+        std::cout << "  [bench] Total — "
+                  << std::fixed << std::setprecision(3) << totalMs << " ms\n";
+    }
+
     return current;
 }
 

@@ -1,16 +1,16 @@
 /**
- * main.cpp — Medical Image Processor CLI v2.1
+ * main.cpp — Medical Image Processor CLI v2.2
  *
  * Available filters: sobel, gaussian, equalize, median, unsharp, laplacian, windowlevel
  * Available pipelines: full, denoise, log (Laplacian of Gaussian)
- * Extra flags: --stats (print image statistics), --benchmark
+ * Extra flags: --stats (print image statistics), --benchmark, --version
  */
 
-#include "../include/Image.h"
-#include "../include/Filter.h"
-#include "../include/ImageIO.h"
-#include "../include/Pipeline.h"
-#include "../include/Utils.h"
+#include "Image.h"
+#include "Filter.h"
+#include "ImageIO.h"
+#include "Pipeline.h"
+#include "Utils.h"
 
 #include <iostream>
 #include <iomanip>
@@ -24,6 +24,8 @@
 
 namespace fs = std::filesystem;
 
+static constexpr const char* VERSION = "2.2.0";
+
 // ─── Argument Parsing ─────────────────────────────────────────────────────────
 
 struct Args {
@@ -34,11 +36,12 @@ struct Args {
     bool benchmark = false;
     bool stats     = false;
     bool help      = false;
+    bool version   = false;
 };
 
 void printUsage(const std::string& prog) {
-    std::cout << "\nMedical Image Processor v2.1\n"
-              << "============================\n\n"
+    std::cout << "\nMedical Image Processor v" << VERSION << "\n"
+              << "================================\n\n"
               << "Usage:\n"
               << "  " << prog << " --input <file.bmp> --output <file.bmp> [options]\n\n"
               << "Options:\n"
@@ -49,7 +52,8 @@ void printUsage(const std::string& prog) {
               << "  --pipeline denoise    Median → Unsharp Mask\n"
               << "  --pipeline log        Gaussian → Laplacian (Laplacian of Gaussian)\n"
               << "  --stats               Print pixel statistics (min/max/mean/stddev)\n"
-              << "  --benchmark           Print per-stage processing time in ms\n"
+              << "  --benchmark           Print per-stage processing time\n"
+              << "  --version             Print version and exit\n"
               << "  --help                Show this message\n\n"
               << "Examples:\n"
               << "  " << prog << " --input scan.bmp --output edges.bmp --filter laplacian --stats\n"
@@ -63,6 +67,8 @@ Args parseArgs(int argc, char* argv[]) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
             args.help = true;
+        } else if (arg == "--version" || arg == "-v") {
+            args.version = true;
         } else if (arg == "--input" && i + 1 < argc) {
             args.inputPath = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
@@ -141,6 +147,11 @@ std::unique_ptr<Filter> makeFilter(const std::string& name) {
 int main(int argc, char* argv[]) {
     try {
         Args args = parseArgs(argc, argv);
+
+        if (args.version) {
+            std::cout << "Medical Image Processor v" << VERSION << "\n";
+            return 0;
+        }
 
         if (args.help || argc == 1) {
             printUsage(argv[0]);

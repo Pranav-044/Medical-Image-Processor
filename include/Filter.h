@@ -34,13 +34,17 @@ public:
      * Apply this filter to the input image and return the result.
      * Input is not modified — all filters produce new Image instances.
      * This immutability makes pipelines composable and thread-safe.
+     *
+     * [[nodiscard]]: callers must use the returned image; ignoring it is a bug.
      */
+    [[nodiscard]]
     virtual Image<uint8_t> apply(const Image<uint8_t>& input) const = 0;
 
     /**
      * Human-readable filter name, used by ProcessingPipeline::printStages()
      * and the --benchmark CLI flag.
      */
+    [[nodiscard]]
     virtual std::string name() const = 0;
 };
 
@@ -112,8 +116,8 @@ public:
      */
     explicit GaussianBlur(int kernelSize = 3, float sigma = 1.0f);
 
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override;
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override;
 
 private:
     std::vector<std::vector<float>> buildGaussianKernel(int size, float sigma) const;
@@ -142,8 +146,8 @@ private:
  */
 class SobelFilter : public Filter {
 public:
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override { return "Sobel Edge Detection"; }
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override { return "Sobel Edge Detection"; }
 
 private:
     static const std::vector<std::vector<float>> Gx_;
@@ -170,11 +174,11 @@ private:
  */
 class HistogramEqualizer : public Filter {
 public:
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override { return "Histogram Equalization"; }
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override { return "Histogram Equalization"; }
 
-    std::array<int, 256> computeHistogram(const Image<uint8_t>& img) const;
-    std::array<int, 256> computeCDF(const std::array<int, 256>& hist) const;
+    std::array<int, 256>     computeHistogram(const Image<uint8_t>& img) const;
+    std::array<int, 256>     computeCDF(const std::array<int, 256>& hist) const;
     std::array<uint8_t, 256> buildLUT(const std::array<int, 256>& cdf,
                                       int totalPixels) const;
 };
@@ -204,8 +208,8 @@ class MedianFilter : public Filter {
 public:
     explicit MedianFilter(int kernelSize = 3);
 
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override;
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override;
 };
 
 // ─── Unsharp Mask ─────────────────────────────────────────────────────────────
@@ -235,8 +239,8 @@ class UnsharpMask : public Filter {
 public:
     explicit UnsharpMask(float amount = 1.0f, int kernelSize = 3, float sigma = 1.0f);
 
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override;
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override;
 };
 
 // ─── Laplacian Filter ─────────────────────────────────────────────────────────
@@ -264,8 +268,8 @@ public:
 class LaplacianFilter : public ConvolutionFilter {
 public:
     LaplacianFilter();
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override { return "Laplacian Edge Detection"; }
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override { return "Laplacian Edge Detection"; }
 };
 
 // ─── Window / Level ───────────────────────────────────────────────────────────
@@ -288,6 +292,6 @@ class WindowLevel : public Filter {
     float level_;
 public:
     explicit WindowLevel(float window = 200.0f, float level = 128.0f);
-    Image<uint8_t> apply(const Image<uint8_t>& input) const override;
-    std::string name() const override;
+    [[nodiscard]] Image<uint8_t> apply(const Image<uint8_t>& input) const override;
+    [[nodiscard]] std::string name() const override;
 };

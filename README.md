@@ -1,6 +1,6 @@
 # Medical Image Processor
 
-> Diagnostic imaging pipelines preprocess raw scans before radiologist review. This tool replicates foundational steps — contrast enhancement (histogram equalization), noise reduction (Gaussian and Median filtering), and feature extraction (Sobel edge detection) — used in modalities like CT and MRI.
+> Diagnostic imaging pipelines preprocess raw scans before radiologist review. This tool replicates foundational steps — contrast enhancement (histogram equalization), noise reduction (Gaussian and Median filtering), and feature extraction (Sobel / Laplacian edge detection) — used in modalities like CT and MRI.
 
 Built from scratch in **C++17** with no external image libraries. Every algorithm is implemented at the mathematical level — the kind of transparent, auditable code required in regulated medical device software (IEC 62304).
 
@@ -12,7 +12,7 @@ Built from scratch in **C++17** with no external image libraries. Every algorith
 medical-image-processor/
 ├── include/
 │   ├── Image.h       # Templated Image<T> — core data structure
-│   ├── Filter.h      # Abstract Filter + full filter hierarchy (5 filters)
+│   ├── Filter.h      # Abstract Filter + full filter hierarchy (7 filters)
 │   ├── ImageIO.h     # Manual BMP file parsing (24-bit, BGR, bottom-up)
 │   ├── Pipeline.h    # Composable filter chain with benchmarking
 │   └── Utils.h       # saturate_cast, luminance, gradient magnitude, padding
@@ -20,9 +20,9 @@ medical-image-processor/
 │   ├── Filter.cpp    # All filter implementations (multithreaded Gaussian)
 │   ├── ImageIO.cpp
 │   ├── Pipeline.cpp
-│   └── main.cpp      # CLI: --filter, --pipeline full/denoise, --benchmark
+│   └── main.cpp      # CLI: --filter, --pipeline full/denoise/log, --benchmark, --stats
 ├── tests/
-│   └── test_filters.cpp   # Self-contained test suite (9 groups, 45+ assertions)
+│   └── test_filters.cpp   # Self-contained test suite (11 groups, 60+ assertions)
 ├── samples/               # Test BMP images
 └── CMakeLists.txt
 ```
@@ -31,10 +31,10 @@ medical-image-processor/
 
 ## Build
 
-**Requirements:** CMake 3.16+, GCC 10+ or Clang 12+ (C++17 required)
+**Requirements:** CMake 3.16+, GCC 10+ or Clang 12+ or MSVC 19.14+ (C++17 required)
 
 ```bash
-git clone https://github.com/wrewre/Medical-Image-Processor.git
+git clone https://github.com/Pranav-044/Medical-Image-Processor.git
 cd Medical-Image-Processor
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -44,6 +44,12 @@ cmake --build build
 Produces two binaries:
 - `medimg` — the CLI tool
 - `medimg_tests` — the test runner
+
+### Optional: Install
+
+```bash
+cmake --install build --prefix /usr/local
+```
 
 ---
 
@@ -62,11 +68,22 @@ Produces two binaries:
 # Denoise + detail enhancement pipeline (Median → Unsharp Mask)
 ./build/medimg --input samples/scan.bmp --output out/result.bmp --pipeline denoise
 
-# With per-stage timing
+# Laplacian of Gaussian (LoG) pipeline (Gaussian → Laplacian)
+./build/medimg --input samples/scan.bmp --output out/result.bmp --pipeline log
+
+# With per-stage timing (microsecond precision)
 ./build/medimg --input samples/scan.bmp --output out/result.bmp --pipeline full --benchmark
+
+# Print pixel statistics (min / max / mean / std dev)
+./build/medimg --input samples/scan.bmp --output out/result.bmp --filter sobel --stats
+
+# Print version
+./build/medimg --version
 ```
 
-**Available filters:** `sobel`, `gaussian`, `equalize`, `median`, `unsharp`
+**Available filters:** `sobel`, `gaussian`, `equalize`, `median`, `unsharp`, `laplacian`, `windowlevel`
+
+**Available pipelines:** `full`, `denoise`, `log`
 
 ---
 
@@ -87,6 +104,8 @@ Produces two binaries:
 | **Histogram Equalization** | CDF normalisation | O(W×H + 256) | Contrast enhancement on low-exposure scans |
 | **Median Filter** | Non-linear, nth_element | O(W×H×K²) | Salt-and-pepper noise removal in ultrasound |
 | **Unsharp Mask** | High-pass amplification | O(W×H×K²) | Sharpening microcalcifications in mammography |
+| **Laplacian Filter** | Second-order derivative | O(W×H) | Fine detail / hairline fracture detection in CT |
+| **Window / Level** | Linear remap + clamp | O(W×H) | Radiologist contrast control (CT/MRI W/L sliders) |
 
 ---
 
@@ -121,7 +140,9 @@ No raw `new`/`delete`. `unique_ptr<T[]>` enforces single ownership and automatic
 
 ### Abstract `Filter` base class
 
-All filters implement a single interface: take an image, return a new image. The pipeline doesn't know which filter it's running — it just calls `apply()`. Adding a new filter (e.g., bilateral, Laplacian) requires zero changes to existing code — Open/Closed Principle.
+All filters implement a single interface: take an image, return a new image. The pipeline doesn't know which filter it's running — it just calls `apply()`. Adding a new filter (e.g., bilateral, anisotropic diffusion) requires zero changes to existing code — Open/Closed Principle.
+
+The `[[nodiscard]]` attribute on `apply()` and `name()` ensures callers cannot accidentally discard the returned image — a compile-time safety net.
 
 ### Zero-padding for border handling
 
@@ -163,6 +184,29 @@ detail   = original - gaussian_blur(original)
 output   = clamp(original + amount × detail, 0, 255)
 ```
 
+### Laplacian Filter — O(W × H)
+
+Applies the 8-connectivity discrete Laplacian kernel. Sum of all weights = 0 (pure high-pass). Absolute value taken so both positive and negative edge responses are preserved:
+
+```
+kernel = [[-1, -1, -1],
+          [-1,  8, -1],
+          [-1, -1, -1]]
+
+output = clamp(|Laplacian(pixel)|, 0, 255)
+```
+
+Combine with Gaussian blur first (LoG pipeline) for noise-robust fine-edge detection.
+
+### Window / Level — O(W × H)
+
+```
+lower  = level - window / 2
+output = clamp((pixel - lower) / window × 255, 0, 255)
+```
+
+Identical to the W/L sliders in Siemens Syngo.via and OsiriX. Narrow window → high contrast; wide window → full dynamic range.
+
 ---
 
 ## Phases
@@ -173,10 +217,11 @@ output   = clamp(original + amount × detail, 0, 255)
 | 2 — BMP I/O | ✅ | Manual 24-bit BMP read/write |
 | 3 — Filter Hierarchy | ✅ | Gaussian (multithreaded), Sobel |
 | 4 — Histogram Equalisation | ✅ | CDF-based LUT |
-| 5 — Pipeline + CLI | ✅ | 2 predefined pipelines, `--benchmark` |
-| 6 — Tests | ✅ | 9 test groups, 45+ assertions |
+| 5 — Pipeline + CLI | ✅ | 3 predefined pipelines, `--benchmark`, `--stats`, `--version` |
+| 6 — Tests | ✅ | 11 test groups, 60+ assertions |
 | 7 — Advanced Filters | ✅ | Median Filter, Unsharp Mask |
 | 8 — Multithreading | ✅ | Lock-free row-band parallelism |
+| 9 — Extended Filters | ✅ | Laplacian (LoG pipeline), Window/Level |
 
 ---
 

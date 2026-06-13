@@ -1,5 +1,5 @@
-#include "../include/ImageIO.h"
-#include "../include/Utils.h"
+#include "ImageIO.h"
+#include "Utils.h"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>

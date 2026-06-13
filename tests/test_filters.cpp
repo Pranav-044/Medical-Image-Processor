@@ -18,11 +18,11 @@
  *   T11 — Window/Level
  */
 
-#include "../include/Image.h"
-#include "../include/Filter.h"
-#include "../include/ImageIO.h"
-#include "../include/Pipeline.h"
-#include "../include/Utils.h"
+#include "Image.h"
+#include "Filter.h"
+#include "ImageIO.h"
+#include "Pipeline.h"
+#include "Utils.h"
 
 #include <iostream>
 #include <cassert>

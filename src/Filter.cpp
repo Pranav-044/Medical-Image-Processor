@@ -1,5 +1,5 @@
-#include "../include/Filter.h"
-#include "../include/Utils.h"
+#include "Filter.h"
+#include "Utils.h"
 #include <cmath>
 #include <stdexcept>
 #include <numeric>
